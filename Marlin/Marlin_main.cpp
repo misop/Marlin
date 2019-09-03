@@ -254,6 +254,7 @@
  *
  */
 
+#include "HardwareSerial.h"
 #include "Marlin.h"
 
 #include "ultralcd.h"
@@ -7640,7 +7641,7 @@ inline void gcode_M42() {
   const pin_t pin_number = parser.byteval('P', LED_PIN);
   if (pin_number < 0) return;
 
-  if (!parser.boolval('I') && pin_is_protected(pin_number)) return protected_pin_err();
+  //if (!parser.boolval('I') && pin_is_protected(pin_number)) return protected_pin_err();
 
   pinMode(pin_number, OUTPUT);
   digitalWrite(pin_number, pin_status);
@@ -12640,12 +12641,64 @@ inline void gcode_T(const uint8_t tmp_extruder) {
 }
 
 /**
+ * R1-R32 - Command to picopulse through RS232
+ */
+
+inline void picopulse_send(String command, char *parameters) {
+  if (parameters != NULL) {
+    int len = 0;
+    while (parameters[len] != NULL) {
+      len++;
+    }
+    Serial2.write(parameters, len);
+  }
+  Serial2.write(command.c_str(), 4);
+  Serial2.write('\r');
+}
+
+inline void picopulse_receive() {
+  char str[255];
+  bool done = false;
+  int idx = 0;
+  unsigned long start = millis();
+  while(!done) {
+    if(Serial2.available()) {
+      str[idx] = Serial2.read();
+      idx++;
+    }
+    unsigned long now = millis();
+    if ((now - start) >= 1000 || (idx >= 2 && str[idx - 2] == '<' && str[idx - 1] == '3')) {
+      done = true;
+    }
+  }
+  MYSERIAL0.write((uint8_t*)str, idx);
+  MYSERIAL0.write('\n');
+}
+
+inline void picopulse_process_command(String command, int parameters = 1) {
+  switch (parameters) {
+    case 0:
+      picopulse_send(command, NULL);
+      picopulse_receive();
+      break;
+    case 1:
+      if (parameters == 1 && parser.seen('P')) {
+        picopulse_send(command, parser.value_ptr);
+        picopulse_receive();
+      }
+      break;
+    default:
+    break;
+  }
+}
+
+/**
  * Process the parsed command and dispatch it to its handler
  */
 void process_parsed_command() {
   KEEPALIVE_STATE(IN_HANDLER);
 
-  // Handle a known G, M, or T
+  // Handle a known G, M, T, or R
   switch (parser.command_letter) {
     case 'G': switch (parser.codenum) {
 
@@ -13110,6 +13163,44 @@ void process_parsed_command() {
     break;
 
     case 'T': gcode_T(parser.codenum); break;                     // T: Tool Select
+
+    case 'R': switch (parser.codenum) {                           // R : picopulse RS232
+      case 1: picopulse_process_command("drv1"); break;           // R1: Sets the valve mode, 1 = timed, 2 = purge, 3 = continuous, 5 = read mode
+      case 2: picopulse_process_command("dcn1"); break;           // R2: Sets the valve dispense count
+      case 3: picopulse_process_command("ont1"); break;           // R3: Sets the valve ON time
+      case 4: picopulse_process_command("oft1"); break;           // R4: Sets the valve OFF time
+      case 5: picopulse_process_command("rdr1", 0); break;        // R5: Returns the valve status
+      case 6: picopulse_process_command("cycl"); break;           // R6: Cycles the valve (mimics the CYCLE icon on the touchscreen)
+      case 7: picopulse_process_command("dpwr"); break;           // R7: Sets the valve power control
+      case 8: picopulse_process_command("plok"); break;           // R8: Sets the duration of the PULSE OK TIME I/O pin output
+      case 9: picopulse_process_command("drvo", 0); break;        // R9: Sets the driver configuration at power up to ON
+      case 10: picopulse_process_command("drvf", 0); break;       // R10: Sets the driver configuration at power up to OFF (default)
+      case 11: /* TODO implement sdr1 */ break;                   // R11: Sets OPEN, CLOSE, and COUNT in one command
+      case 12: picopulse_process_command("chtr"); break;          // R12: Sets the heater mode
+      case 13: picopulse_process_command("stmp"); break;          // R13: Sets the heater temperature setpoint
+      case 14: picopulse_process_command("rhtr", 0); break;       // R14: Returns the heater status
+      case 15: picopulse_process_command("trng"); break;          // R15: Sets the adjustable temperature range limit for I/O 1 pin 5 (Status of Temperature)
+      case 16: picopulse_process_command("rrng", 0); break;       // R16: Reads the adjustable temperature range limit for I/O 1 pin 5 (Status of Temperature)
+      case 17: picopulse_process_command("rzpr"); break;          // R17: Sets the close (rise) profile of the valve
+      case 18: picopulse_process_command("flpr"); break;          // R18: Sets the open (fall) profile of the valve
+      case 19: picopulse_process_command("strk"); break;          // R19: Sets the stroke of the valve
+      case 20: picopulse_process_command("volp"); break;          // R20: Sets the close voltage of the valve
+      case 21: picopulse_process_command("clst"); break;          // R21: Sets the close (rise) time of the valve
+      case 22: picopulse_process_command("opnt"); break;          // R22: Sets the open (fall) time of the valve
+      case 23: picopulse_process_command("cfg1"); break;          // R23: Configures I/O 1 pin 6 for Error Reset (default), Valve Power On/ Off Control, or Valve Purge Control
+      case 24: picopulse_process_command("cfg2"); break;          // R24: Configures I/O 1 pin 12 for Temperature Off (default), Valve Power On/Off Control, or Valve Purge Control
+      case 25: picopulse_process_command("rcfg", 0); break;       // R25: Reads the current configuration settings for I/O 1 pins 6 and 12
+      case 26: picopulse_process_command("dioi", 0); break;       // R26: Sets the following pins to an internally provided (non-isolated) signal:
+      case 27: picopulse_process_command("dioe", 0); break;       // R27: Sets the following pins to an externally provided (non-isolated) signal:
+      case 28: picopulse_process_command("rlay", 0); break;       // R28: Reads the current settings (as set using the dioi and dioe commands) for the following pins:
+      case 29: picopulse_process_command("info", 0); break;       // R29: Displays the controller and valve Information
+      case 30: picopulse_process_command("ralr", 0); break;       // R30: Retrieves the last 40 (0–39) alarm conditions that occurred; includes time and alarm name
+      case 31: picopulse_process_command("stat", 0); break;       // R31: Returns the system status (active alarms) as a bitmap or SYS OK when there are no alarms
+      case 32: picopulse_process_command("arst", 0); break;       // R32: Resets a currently active alarm
+
+      default: parser.unknown_command_error();
+    }
+    break;
 
     default: parser.unknown_command_error();
   }
@@ -15058,6 +15149,7 @@ void setup() {
   MYSERIAL0.begin(BAUDRATE);
   SERIAL_PROTOCOLLNPGM("start");
   SERIAL_ECHO_START();
+  Serial2.begin(115200, SERIAL_8N1);
 
   // Prepare communication for TMC drivers
   #if HAS_DRIVER(TMC2130)

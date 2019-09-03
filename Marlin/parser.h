@@ -56,7 +56,6 @@
 class GCodeParser {
 
 private:
-  static char *value_ptr;           // Set by seen, used to fetch the value
 
   #if ENABLED(FASTER_GCODE_PARSER)
     static uint32_t codebits;       // Parameters pre-scanned
@@ -66,6 +65,7 @@ private:
   #endif
 
 public:
+  static char *value_ptr;           // Set by seen, used to fetch the value
 
   // Global states for GCode-level units features
 
