@@ -12676,6 +12676,9 @@ inline void picopulse_receive() {
 }
 
 inline void picopulse_process_command(String command, int parameters = 1) {
+  // synchronize execution with movement
+  planner.synchronize();
+  // process the command
   switch (parameters) {
     case 0:
       picopulse_send(command, NULL);
